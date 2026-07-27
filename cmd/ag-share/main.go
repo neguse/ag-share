@@ -34,6 +34,12 @@ import (
 const (
 	staleStateAge = 7 * 24 * time.Hour
 	postInterval  = 300 * time.Millisecond
+
+	// Codex fires Stop before flushing the turn's task_complete record
+	// (~1.5s observed); OpenWait polls until it lands. Bounded well under
+	// the hook timeout.
+	turnFlushWait = 10 * time.Second
+	turnFlushPoll = 200 * time.Millisecond
 )
 
 func main() {
@@ -228,7 +234,7 @@ func hookStop(agent string) {
 		return
 	}
 
-	src, err := transcript.Open(agent, in.TranscriptPath)
+	src, err := transcript.OpenWait(agent, in.TranscriptPath, in.TurnID, turnFlushWait, turnFlushPoll)
 	if err != nil {
 		hookio.Logf("hook-stop: transcript: %v", err)
 		return

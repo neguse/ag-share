@@ -16,13 +16,15 @@ import (
 
 // Input is the hook payload common to UserPromptSubmit and Stop.
 // Verified fields: session_id, transcript_path, cwd, hook_event_name on both;
-// prompt on UserPromptSubmit only.
+// prompt on UserPromptSubmit only. turn_id is Codex-only (its turn-scoped
+// hooks carry the completing turn's ID; Claude Code sends none).
 type Input struct {
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
 	CWD            string `json:"cwd"`
 	Prompt         string `json:"prompt"`
 	HookEventName  string `json:"hook_event_name"`
+	TurnID         string `json:"turn_id"`
 }
 
 // Read decodes the hook input from r (stdin).

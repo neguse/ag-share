@@ -57,8 +57,9 @@ The agent is thus a **registration-time fact, not a runtime guess**: no sniffing
 Codex-specific operational facts (verified against the hooks doc and codex-cli 0.145.0 unless noted):
 
 - Hooks are a stable, default-on feature (`codex features list`: `hooks stable true`)
-- Codex requires the user to review and **trust each hook definition** (by hash) before it runs — `/hooks` in a Codex session; untrusted hooks are skipped silently. This is a per-install, per-hook-change approval; the README documents it as an install step. Hook definitions live in the plugin and change rarely (binary updates flow through `bin/run.sh`, not the hook definition)
-- Unverified empirically (requires an interactively-trusted hook): actual hook firing with payload, whether `transcript_path` points at the session rollout file, whether Stop fires after the rollout's `task_complete` record is flushed (if not, forwarding lags one turn — content is never lost, the cursor just advances at the next Stop), and whether hooks fire in `codex exec`. These are the first things to check in real use
+- Codex requires the user to review and **trust each hook definition** (by hash) before it runs — `/hooks` in a Codex session; untrusted hooks are skipped silently. Trust and **enable** are separate states (`[hooks.state]` in `~/.codex/config.toml` records `trusted_hash` and `enabled` per hook): a hook that is trusted but not enabled is also skipped silently, with nothing in ag-share's `error.log` or Codex's TUI log (both checked). Observed on 2026-07-28: a first real session had `enabled = true` on only one of the two hooks and Stop simply never ran — when forwarding silently does nothing, check `[hooks.state]` first. This is a per-install, per-hook-change approval; the README documents it as an install step. Hook definitions live in the plugin and change rarely (binary updates flow through `bin/run.sh`, not the hook definition)
+- Verified on a real session (codex-cli 0.145.0, 2026-07-28): both hooks fire with the documented payload; `transcript_path` points at the session rollout file (the enablement cursor picked up a real `turn_id`); a UserPromptSubmit-blocked toggle still produces an empty `task_started`/`task_complete` pair in the rollout (nothing forwarded — the turn has no content); and **Stop fires before the turn's `task_complete` record is flushed** (~1.5s observed between `agent_message` and `task_complete`), which without compensation delays every post by one turn and never posts a session's last turn. `OpenWait` compensates: the Stop payload's `turn_id` names the completing turn, so the Stop hook polls the rollout (200ms interval, 10s bound, under the 30s hook timeout) until that turn's `task_complete` lands, then proceeds; on timeout (abort, format drift) it proceeds with what is readable and the turn is picked up at the next Stop
+- Unverified empirically: whether hooks fire in `codex exec` (non-interactive)
 
 ### Codex transcript extraction
 
@@ -68,8 +69,8 @@ A Codex session transcript ("rollout", `~/.codex/sessions/YYYY/MM/DD/rollout-*.j
 - **Agent text**: `event_msg` with `payload.type == "agent_message"` — all phases, including commentary between tool calls
 - **Tool call count**: `response_item` records with `payload.type == "function_call"`
 - **Turn boundary / cursor**: `event_msg` with `payload.type == "task_complete"`; its `turn_id` is the cursor value stored in `last_posted_uuid`. Rollout lines have no per-line UUID, so the completed turn is the cursor unit
-- Everything else is skipped: `session_meta`, `turn_context`, `reasoning`, `function_call_output`, `token_count`, ...
-- Content after the last `task_complete` belongs to a turn still in flight and is left for a later Stop — on ambiguity, never post
+- Everything else is skipped: `session_meta`, `turn_context`, `task_started`, `reasoning`, `function_call_output`, `token_count`, ...
+- Content after the last `task_complete` belongs to a turn still in flight and is left for a later Stop — on ambiguity, never post. The Stop-side wait for the completing turn's record is `OpenWait` (see Agent abstraction)
 - Rollouts carry no title record (Codex keeps thread names in a separate index file, another unstable internal), so `Title()` returns `""` and the prompt-head fallback names the thread
 
 ### Backend abstraction
@@ -353,4 +354,4 @@ The remaining per-user setup is the backend credentials (user config); the plugi
 ## Open questions
 
 - [ ] Pre-warm the binary download in a `SessionStart` hook, so the first toggle never races the download?
-- [ ] Verify on a real Codex session: hook firing after trust approval, `transcript_path` target, Stop-vs-`task_complete` ordering (one-turn lag if Stop flushes first), `codex exec` behavior, and `codex plugin add` from this repo
+- [ ] Does `codex exec` (non-interactive) fire hooks? (The rest of the 2026-07-28 real-session verification — hook firing, `transcript_path` target, Stop ordering, `codex plugin add` from this repo — is recorded in "Agent abstraction")

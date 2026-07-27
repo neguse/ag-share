@@ -1,6 +1,9 @@
 package transcript
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Source is one parsed session transcript. Each supported agent (Claude Code,
 // Codex) has its own on-disk format; behind this interface the hook logic is
@@ -21,6 +24,30 @@ type Source interface {
 	// cursorFound=false means the cursor no longer exists in the transcript
 	// (unknown rewrite); the caller resets to latest and skips the range.
 	SplitAfter(cursor string) (chunks []Chunk, latest string, cursorFound bool)
+}
+
+// OpenWait is Open, but first waits (bounded by wait, polling every poll)
+// until the transcript contains the completed turn turnID. Codex fires Stop
+// before flushing the turn's task_complete record to the rollout (verified
+// empirically: the cursor trailed the thread by one turn without this), so
+// extraction must wait for the record to land. turnID "" skips the wait
+// (Claude Code sends no turn_id, and it flushes before Stop). On timeout the
+// transcript is returned as-is: the turn simply rides along at the next Stop.
+func OpenWait(agent, path, turnID string, wait, poll time.Duration) (Source, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		src, err := Open(agent, path)
+		if err != nil || turnID == "" {
+			return src, err
+		}
+		if _, _, found := src.SplitAfter(turnID); found {
+			return src, nil
+		}
+		if time.Now().After(deadline) {
+			return src, nil
+		}
+		time.Sleep(poll)
+	}
 }
 
 // Open reads the transcript at path in the named agent's format. A missing

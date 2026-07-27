@@ -25,9 +25,12 @@ codex plugin add ag-share@ag-share
 ```
 
 Codex requires you to review and trust the plugin's hooks before they run:
-run `/hooks` inside a Codex session and approve the two ag-share hooks once
-(trust is recorded per hook hash, so plugin updates that change a hook ask
-again).
+run `/hooks` inside a Codex session and both **trust and enable** each of the
+two ag-share hooks (they are separate states — a trusted-but-not-enabled hook
+is skipped silently). Trust is recorded per hook hash, so plugin updates that
+change a hook ask again. If forwarding silently does nothing, check the
+`[hooks.state]` entries in `~/.codex/config.toml` for a missing
+`enabled = true`.
 
 On Windows, [Git for Windows](https://git-scm.com/downloads/win) is required
 (hooks run under Git Bash).

@@ -1,9 +1,11 @@
 package transcript
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/neguse/ag-share/internal/backend"
 )
@@ -119,5 +121,65 @@ func TestCodexMissingFileIsEmptyTranscript(t *testing.T) {
 func TestOpenRejectsUnknownAgent(t *testing.T) {
 	if _, err := Open("gemini", "whatever.jsonl"); err == nil {
 		t.Fatal("Open must reject unknown agents")
+	}
+}
+
+// Codex flushes task_complete after firing Stop; OpenWait must pick up the
+// record when it lands mid-wait.
+func TestOpenWaitPicksUpLateTaskComplete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	turn1 := `{"type":"event_msg","payload":{"type":"user_message","message":"p"}}` + "\n" +
+		`{"type":"event_msg","payload":{"type":"agent_message","message":"a"}}` + "\n"
+	if err := os.WriteFile(path, []byte(turn1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		_, _ = f.WriteString(`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"t1"}}` + "\n")
+	}()
+
+	src, err := OpenWait("codex", path, "t1", 2*time.Second, 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("OpenWait: %v", err)
+	}
+	chunks, _, found := src.SplitAfter("")
+	if !found || len(chunks) != 1 || chunks[0].LastUUID != "t1" {
+		t.Fatalf("chunks = %+v found=%v, want the completed turn t1", chunks, found)
+	}
+}
+
+// A turn that never lands (abort, format drift) must not block past the
+// bound; the transcript is returned as-is.
+func TestOpenWaitTimesOutAndReturns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"event_msg","payload":{"type":"user_message","message":"p"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	src, err := OpenWait("codex", path, "never", 150*time.Millisecond, 20*time.Millisecond)
+	if err != nil {
+		t.Fatalf("OpenWait: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("OpenWait blocked %v; want bounded wait", elapsed)
+	}
+	if _, _, found := src.SplitAfter("never"); found {
+		t.Fatal("turn must still be absent after timeout")
+	}
+}
+
+// Claude Code sends no turn_id; OpenWait must not wait at all.
+func TestOpenWaitEmptyTurnIDSkipsWait(t *testing.T) {
+	start := time.Now()
+	if _, err := OpenWait("claude", filepath.Join(t.TempDir(), "absent.jsonl"), "", 2*time.Second, 100*time.Millisecond); err != nil {
+		t.Fatalf("OpenWait: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("OpenWait waited %v with empty turn ID", elapsed)
 	}
 }
