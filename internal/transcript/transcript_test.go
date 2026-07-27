@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/neguse/ag-share/internal/backend"
 )
@@ -306,4 +307,95 @@ func TestSplitAfter(t *testing.T) {
 	if _, _, found := SplitAfter(entries, "missing"); found {
 		t.Error("SplitAfter(missing cursor) cursorFound = true, want false")
 	}
+}
+
+func TestContainsFinalText(t *testing.T) {
+	t.Parallel()
+
+	entries, err := ReadEntries(filepath.Join("testdata", "session.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalText := "Added TestTokenCompare; go test ./... passes."
+
+	tests := []struct {
+		name  string
+		after string
+		text  string
+		want  bool
+	}{
+		{name: "text after cursor", after: "a4", text: finalText, want: true},
+		{name: "whole transcript", after: "", text: finalText, want: true},
+		{name: "text only before cursor", after: "a6", text: "Looking at the auth module first.", want: false},
+		{name: "text absent", after: "", text: "never said this", want: false},
+		{name: "missing cursor stops waiting", after: "missing-uuid", text: "never said this", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := containsFinalText(entries, tt.after, tt.text); got != tt.want {
+				t.Fatalf("containsFinalText(after=%q, text=%q) = %v, want %v", tt.after, tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAwaitFinalText(t *testing.T) {
+	t.Parallel()
+
+	line := func(uuid, text string) string {
+		return `{"type":"assistant","uuid":"` + uuid + `","message":{"content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
+	}
+
+	t.Run("returns once the text is appended", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "session.jsonl")
+		if err := os.WriteFile(path, []byte(line("u1", "working on it")), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+			if err != nil {
+				return
+			}
+			defer f.Close()
+			_, _ = f.WriteString(line("u2", "the final answer"))
+		}()
+
+		start := time.Now()
+		AwaitFinalText(path, "", "the final answer", 2*time.Second)
+		elapsed := time.Since(start)
+		if elapsed >= time.Second {
+			t.Fatalf("AwaitFinalText waited %v, want well under the 2s timeout", elapsed)
+		}
+		entries, err := ReadEntries(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !containsFinalText(entries, "", "the final answer") {
+			t.Fatal("AwaitFinalText returned before the final text was readable")
+		}
+	})
+
+	t.Run("empty final text returns immediately", func(t *testing.T) {
+		t.Parallel()
+		start := time.Now()
+		AwaitFinalText(filepath.Join(t.TempDir(), "missing.jsonl"), "", "", time.Second)
+		if elapsed := time.Since(start); elapsed >= 100*time.Millisecond {
+			t.Fatalf("AwaitFinalText(empty text) waited %v, want immediate return", elapsed)
+		}
+	})
+
+	t.Run("gives up at the timeout", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "session.jsonl")
+		if err := os.WriteFile(path, []byte(line("u1", "working on it")), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		AwaitFinalText(path, "", "never arrives", 100*time.Millisecond)
+		if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
+			t.Fatalf("AwaitFinalText returned after %v, want at least the 100ms timeout", elapsed)
+		}
+	})
 }

@@ -34,6 +34,7 @@ import (
 const (
 	staleStateAge = 7 * 24 * time.Hour
 	postInterval  = 300 * time.Millisecond
+	finalTextWait = 500 * time.Millisecond
 )
 
 func main() {
@@ -228,6 +229,13 @@ func hookStop(agent string) {
 		return
 	}
 
+	// Claude Code flushes the turn's final assistant entry asynchronously —
+	// at Stop time the transcript may still end before it (measured ~100ms
+	// late). The payload's last_assistant_message is the guaranteed copy of
+	// that text, so wait until it is readable after the cursor.
+	if agent == "claude" {
+		transcript.AwaitFinalText(in.TranscriptPath, s.LastPostedUUID, in.LastAssistantMessage, finalTextWait)
+	}
 	// in.TurnID (Codex only) attributes the trailing in-flight content to the
 	// completing turn — Codex writes its task_complete only after this hook
 	// exits, so waiting for it would deadlock into the timeout instead.

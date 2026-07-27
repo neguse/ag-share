@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"time"
 
 	"github.com/neguse/ag-share/internal/backend"
 )
@@ -214,6 +215,63 @@ func SplitAfter(entries []Entry, afterUUID string) (chunks []Chunk, lastUUID str
 		chunks[n-1].LastUUID = lastUUID
 	}
 	return chunks, lastUUID, true
+}
+
+const awaitPollInterval = 25 * time.Millisecond
+
+// AwaitFinalText blocks until finalText — the Stop payload's
+// last_assistant_message — is readable as an assistant text block strictly
+// after the entry with UUID afterUUID, or until timeout passes. Claude Code
+// flushes the turn's final assistant entry asynchronously, so at Stop time the
+// file may still end before it (the hooks reference guarantees only the
+// payload field, not the file); extracting without waiting drops the final
+// answer from the posted turn. An empty finalText (interrupted turn) returns
+// immediately. Best-effort: on timeout the caller just extracts what is there.
+func AwaitFinalText(path, afterUUID, finalText string, timeout time.Duration) {
+	if finalText == "" {
+		return
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		entries, err := ReadEntries(path)
+		if err == nil && containsFinalText(entries, afterUUID, finalText) {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			return
+		}
+		time.Sleep(awaitPollInterval)
+	}
+}
+
+// containsFinalText reports whether an assistant text block equal to finalText
+// exists strictly after afterUUID. A cursor that is not in the transcript
+// reports true: waiting cannot resolve an unknown rewrite, and SplitAfter
+// already handles it by resetting the cursor.
+func containsFinalText(entries []Entry, afterUUID, finalText string) bool {
+	start := 0
+	if afterUUID != "" {
+		found := false
+		for i, entry := range entries {
+			if entry.UUID == afterUUID {
+				start = i + 1
+				found = true
+				break
+			}
+		}
+		if !found {
+			return true
+		}
+	}
+	for _, entry := range entries[start:] {
+		texts, _ := entry.AssistantContent()
+		for _, text := range texts {
+			if text == finalText {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ExtractAfter is SplitAfter merged into a single Turn; kept for callers that

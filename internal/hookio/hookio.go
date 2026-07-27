@@ -18,13 +18,17 @@ import (
 // Verified fields: session_id, transcript_path, cwd, hook_event_name on both;
 // prompt on UserPromptSubmit only. turn_id is Codex-only (its turn-scoped
 // hooks carry the completing turn's ID; Claude Code sends none).
+// last_assistant_message is Claude Code Stop only: the turn's final response
+// text, which the hooks reference guarantees even when the transcript file
+// does not yet contain it.
 type Input struct {
-	SessionID      string `json:"session_id"`
-	TranscriptPath string `json:"transcript_path"`
-	CWD            string `json:"cwd"`
-	Prompt         string `json:"prompt"`
-	HookEventName  string `json:"hook_event_name"`
-	TurnID         string `json:"turn_id"`
+	SessionID            string `json:"session_id"`
+	TranscriptPath       string `json:"transcript_path"`
+	CWD                  string `json:"cwd"`
+	Prompt               string `json:"prompt"`
+	HookEventName        string `json:"hook_event_name"`
+	TurnID               string `json:"turn_id"`
+	LastAssistantMessage string `json:"last_assistant_message"`
 }
 
 // Read decodes the hook input from r (stdin).
