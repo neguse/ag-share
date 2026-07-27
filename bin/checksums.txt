@@ -1,0 +1,4 @@
+d45d804efe66a67d3ff7693e5bce14a24067163bfa5d96b4ddf11281e6a46bf1  ag-share-darwin-amd64
+31e7eac49a0f78af081e471eac0070df465c8b0d3132432ffaf5416403605e9b  ag-share-darwin-arm64
+78ecde433fe8821d98cf7395b96ddcba290aca6c10e83533b8ad53a5b8bfa591  ag-share-linux-amd64
+ba024271b84e8e4cb070b400b0b7a6f2d8d95bebcf5f721977209d193fabf957  ag-share-windows-amd64.exe
