@@ -1,0 +1,14 @@
+{
+  "name": "ag-share",
+  "owner": { "name": "neguse" },
+  "metadata": {
+    "description": "ag-share plugin marketplace (the plugin repo doubles as its own marketplace)"
+  },
+  "plugins": [
+    {
+      "name": "ag-share",
+      "source": "./",
+      "description": "Forward coding-agent sessions (Claude Code, Codex) to a team chat thread, turn by turn, opt-in per session"
+    }
+  ]
+}

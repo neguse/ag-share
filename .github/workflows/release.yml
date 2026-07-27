@@ -1,0 +1,66 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Test
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Cross-compile
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          for spec in linux/amd64 windows/amd64 darwin/amd64 darwin/arm64; do
+            os="${spec%/*}"; arch="${spec#*/}"
+            ext=""; [ "$os" = "windows" ] && ext=".exe"
+            GOOS="$os" GOARCH="$arch" \
+              go build -trimpath -ldflags "-s -w" \
+              -o "dist/ag-share-${os}-${arch}${ext}" ./cmd/ag-share
+          done
+          (cd dist && sha256sum ag-share-* > checksums.txt)
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/ag-share-* dist/checksums.txt \
+            --title "$GITHUB_REF_NAME" --generate-notes
+
+      # bin/run.sh downloads the asset pinned by bin/VERSION and verifies it
+      # against bin/checksums.txt, so both must land on the default branch
+      # after the assets exist (a fresh plugin clone between tag push and this
+      # commit sees the previous release — harmless).
+      - name: Pin release on master
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin master
+          git checkout master
+          printf '%s\n' "$GITHUB_REF_NAME" > bin/VERSION
+          cp dist/checksums.txt bin/checksums.txt
+          # Keep the plugin manifest version in step with the release so
+          # `claude plugin update` sees the new version (and thus the new pin).
+          ver="${GITHUB_REF_NAME#v}"
+          tmp=$(mktemp)
+          jq --arg v "$ver" '.version = $v' .claude-plugin/plugin.json > "$tmp"
+          mv "$tmp" .claude-plugin/plugin.json
+          git add bin/VERSION bin/checksums.txt .claude-plugin/plugin.json
+          git commit -m "release: pin $GITHUB_REF_NAME"
+          git push origin master

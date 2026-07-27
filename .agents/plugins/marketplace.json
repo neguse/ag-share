@@ -1,0 +1,15 @@
+{
+  "name": "ag-share",
+  "interface": {
+    "displayName": "ag-share"
+  },
+  "plugins": [
+    {
+      "name": "ag-share",
+      "source": {
+        "source": "local",
+        "path": "./"
+      }
+    }
+  ]
+}

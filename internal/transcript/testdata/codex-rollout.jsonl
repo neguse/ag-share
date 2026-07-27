@@ -1,0 +1,20 @@
+{"timestamp":"2026-07-27T10:00:00.000Z","type":"session_meta","payload":{"session_id":"0198aaaa-0000-7000-8000-000000000001","id":"0198aaaa-0000-7000-8000-000000000001","cwd":"/work/repo","originator":"codex_cli_rs","cli_version":"0.145.0","base_instructions":{"text":"You are Codex."}}}
+{"timestamp":"2026-07-27T10:00:00.100Z","type":"turn_context","payload":{"model":"gpt-5.6"}}
+{"timestamp":"2026-07-27T10:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1","model_context_window":258400}}
+{"timestamp":"2026-07-27T10:00:01.100Z","type":"event_msg","payload":{"type":"user_message","message":"first prompt","images":[],"local_images":[],"text_elements":[]}}
+{"timestamp":"2026-07-27T10:00:02.000Z","type":"response_item","payload":{"type":"reasoning","summary":[]}}
+{"timestamp":"2026-07-27T10:00:03.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"ls\"]}","call_id":"call-1"}}
+{"timestamp":"2026-07-27T10:00:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"{\"output\":\"README.md\"}"}}
+{"timestamp":"2026-07-27T10:00:05.000Z","type":"event_msg","payload":{"type":"agent_message","message":"looking at the repo first","phase":"commentary"}}
+{"timestamp":"2026-07-27T10:00:06.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_tokens":1234}}}
+{"timestamp":"2026-07-27T10:00:07.000Z","type":"event_msg","payload":{"type":"agent_message","message":"first answer","phase":"final_answer"}}
+{"timestamp":"2026-07-27T10:00:08.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","last_agent_message":"first answer","duration_ms":7000}}
+{"timestamp":"2026-07-27T10:01:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-2","model_context_window":258400}}
+{"timestamp":"2026-07-27T10:01:00.100Z","type":"event_msg","payload":{"type":"user_message","message":"second prompt","images":[]}}
+{"timestamp":"2026-07-27T10:01:01.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{}","call_id":"call-2"}}
+{"timestamp":"2026-07-27T10:01:02.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{}","call_id":"call-3"}}
+{"timestamp":"2026-07-27T10:01:03.000Z","type":"event_msg","payload":{"type":"agent_message","message":"second answer","phase":"final_answer"}}
+{"timestamp":"2026-07-27T10:01:04.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-2","last_agent_message":"second answer","duration_ms":4000}}
+{"timestamp":"2026-07-27T10:02:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-3","model_context_window":258400}}
+{"timestamp":"2026-07-27T10:02:00.100Z","type":"event_msg","payload":{"type":"user_message","message":"third prompt, turn still in flight","images":[]}}
+{"timestamp":"2026-07-27T10:02:01.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{}","call_id":"call-4"}}

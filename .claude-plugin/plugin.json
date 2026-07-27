@@ -1,0 +1,9 @@
+{
+  "name": "ag-share",
+  "version": "0.2.0",
+  "description": "Forward coding-agent sessions (Claude Code, Codex) to a team chat thread, turn by turn, opt-in per session",
+  "author": {
+    "name": "neguse"
+  },
+  "hooks": "./hooks/claude.json"
+}
