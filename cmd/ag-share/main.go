@@ -34,12 +34,6 @@ import (
 const (
 	staleStateAge = 7 * 24 * time.Hour
 	postInterval  = 300 * time.Millisecond
-
-	// Codex fires Stop before flushing the turn's task_complete record
-	// (~1.5s observed); OpenWait polls until it lands. Bounded well under
-	// the hook timeout.
-	turnFlushWait = 10 * time.Second
-	turnFlushPoll = 200 * time.Millisecond
 )
 
 func main() {
@@ -151,7 +145,7 @@ func hookPrompt(agent string) int {
 	latestCursor := func() string {
 		// A missing/empty transcript file means the session has no entries
 		// yet; cursor "" (from the start) is correct then.
-		src, err := transcript.Open(agent, in.TranscriptPath)
+		src, err := transcript.Open(agent, in.TranscriptPath, "")
 		if err != nil {
 			hookio.Logf("hook-prompt: transcript: %v", err)
 			return ""
@@ -234,7 +228,10 @@ func hookStop(agent string) {
 		return
 	}
 
-	src, err := transcript.OpenWait(agent, in.TranscriptPath, in.TurnID, turnFlushWait, turnFlushPoll)
+	// in.TurnID (Codex only) attributes the trailing in-flight content to the
+	// completing turn — Codex writes its task_complete only after this hook
+	// exits, so waiting for it would deadlock into the timeout instead.
+	src, err := transcript.Open(agent, in.TranscriptPath, in.TurnID)
 	if err != nil {
 		hookio.Logf("hook-stop: transcript: %v", err)
 		return

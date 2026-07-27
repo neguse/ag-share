@@ -1,14 +1,11 @@
 package transcript
 
-import (
-	"fmt"
-	"time"
-)
+import "fmt"
 
 // Source is one parsed session transcript. Each supported agent (Claude Code,
 // Codex) has its own on-disk format; behind this interface the hook logic is
 // agent-agnostic. Cursor strings are opaque to callers and format-specific:
-// Claude uses transcript entry UUIDs, Codex uses task_complete turn IDs.
+// Claude uses transcript entry UUIDs, Codex uses turn IDs.
 type Source interface {
 	// LatestCursor returns the cursor for "everything up to now has been
 	// handled" — set on enablement so history is never posted retroactively.
@@ -26,33 +23,16 @@ type Source interface {
 	SplitAfter(cursor string) (chunks []Chunk, latest string, cursorFound bool)
 }
 
-// OpenWait is Open, but first waits (bounded by wait, polling every poll)
-// until the transcript contains the completed turn turnID. Codex fires Stop
-// before flushing the turn's task_complete record to the rollout (verified
-// empirically: the cursor trailed the thread by one turn without this), so
-// extraction must wait for the record to land. turnID "" skips the wait
-// (Claude Code sends no turn_id, and it flushes before Stop). On timeout the
-// transcript is returned as-is: the turn simply rides along at the next Stop.
-func OpenWait(agent, path, turnID string, wait, poll time.Duration) (Source, error) {
-	deadline := time.Now().Add(wait)
-	for {
-		src, err := Open(agent, path)
-		if err != nil || turnID == "" {
-			return src, err
-		}
-		if _, _, found := src.SplitAfter(turnID); found {
-			return src, nil
-		}
-		if time.Now().After(deadline) {
-			return src, nil
-		}
-		time.Sleep(poll)
-	}
-}
-
 // Open reads the transcript at path in the named agent's format. A missing
 // file is a valid empty transcript.
-func Open(agent, path string) (Source, error) {
+//
+// stopTurnID is the completing turn's ID from the Stop hook payload, "" when
+// absent (UserPromptSubmit, or Claude Code, which sends none). Codex needs
+// it because a turn's task_complete record is written only after the Stop
+// hooks finish — the hook can never observe its own turn as complete, so the
+// trailing in-flight content is attributed to stopTurnID instead (see
+// codexSource.SplitAfter).
+func Open(agent, path, stopTurnID string) (Source, error) {
 	switch agent {
 	case "claude":
 		entries, err := ReadEntries(path)
@@ -65,7 +45,7 @@ func Open(agent, path string) (Source, error) {
 		if err != nil {
 			return nil, err
 		}
-		return codexSource{entries}, nil
+		return codexSource{entries: entries, stopTurnID: stopTurnID}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent %q", agent)
 	}

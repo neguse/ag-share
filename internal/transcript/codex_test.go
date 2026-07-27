@@ -1,11 +1,9 @@
 package transcript
 
 import (
-	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/neguse/ag-share/internal/backend"
 )
@@ -13,9 +11,12 @@ import (
 // The fixture mirrors real rollout records (codex-cli 0.145.0): two complete
 // turns and a third still in flight. It is the tripwire for Codex format
 // changes, like session.jsonl is for Claude Code.
-func openCodexFixture(t *testing.T) Source {
+func openCodexFixture(t *testing.T) Source { return openCodexFixtureStop(t, "") }
+
+// openCodexFixtureStop opens the fixture as a Stop hook for turnID would.
+func openCodexFixtureStop(t *testing.T, stopTurnID string) Source {
 	t.Helper()
-	src, err := Open("codex", filepath.Join("testdata", "codex-rollout.jsonl"))
+	src, err := Open("codex", filepath.Join("testdata", "codex-rollout.jsonl"), stopTurnID)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestCodexSplitAfterUnknownCursor(t *testing.T) {
 }
 
 func TestCodexMissingFileIsEmptyTranscript(t *testing.T) {
-	src, err := Open("codex", filepath.Join(t.TempDir(), "absent.jsonl"))
+	src, err := Open("codex", filepath.Join(t.TempDir(), "absent.jsonl"), "")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -119,67 +120,52 @@ func TestCodexMissingFileIsEmptyTranscript(t *testing.T) {
 }
 
 func TestOpenRejectsUnknownAgent(t *testing.T) {
-	if _, err := Open("gemini", "whatever.jsonl"); err == nil {
+	if _, err := Open("gemini", "whatever.jsonl", ""); err == nil {
 		t.Fatal("Open must reject unknown agents")
 	}
 }
 
-// Codex flushes task_complete after firing Stop; OpenWait must pick up the
-// record when it lands mid-wait.
-func TestOpenWaitPicksUpLateTaskComplete(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "rollout.jsonl")
-	turn1 := `{"type":"event_msg","payload":{"type":"user_message","message":"p"}}` + "\n" +
-		`{"type":"event_msg","payload":{"type":"agent_message","message":"a"}}` + "\n"
-	if err := os.WriteFile(path, []byte(turn1), 0o600); err != nil {
-		t.Fatal(err)
+// Codex writes a turn's task_complete only after its Stop hooks exit, so at
+// Stop time the completing turn is the trailing content — attributed to the
+// Stop payload's turn_id.
+func TestCodexSplitAfterAttributesTrailingTurnToStopTurnID(t *testing.T) {
+	chunks, _, found := openCodexFixtureStop(t, "turn-3").SplitAfter("turn-2")
+	if !found {
+		t.Fatal("cursor turn-2 must be found")
 	}
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
-		if err != nil {
-			return
-		}
-		defer f.Close()
-		_, _ = f.WriteString(`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"t1"}}` + "\n")
-	}()
-
-	src, err := OpenWait("codex", path, "t1", 2*time.Second, 10*time.Millisecond)
-	if err != nil {
-		t.Fatalf("OpenWait: %v", err)
-	}
-	chunks, _, found := src.SplitAfter("")
-	if !found || len(chunks) != 1 || chunks[0].LastUUID != "t1" {
-		t.Fatalf("chunks = %+v found=%v, want the completed turn t1", chunks, found)
+	want := []Chunk{{
+		Turn: backend.Turn{
+			UserPrompts: []string{"third prompt, turn still in flight"},
+			ToolCalls:   1,
+		},
+		LastUUID: "turn-3",
+	}}
+	if !reflect.DeepEqual(chunks, want) {
+		t.Errorf("chunks = %+v, want %+v", chunks, want)
 	}
 }
 
-// A turn that never lands (abort, format drift) must not block past the
-// bound; the transcript is returned as-is.
-func TestOpenWaitTimesOutAndReturns(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "rollout.jsonl")
-	if err := os.WriteFile(path, []byte(`{"type":"event_msg","payload":{"type":"user_message","message":"p"}}`+"\n"), 0o600); err != nil {
-		t.Fatal(err)
+// A duplicate Stop for an already-posted turn (cursor == stopTurnID, its
+// task_complete still unflushed) must yield nothing — and must not be treated
+// as an unknown cursor.
+func TestCodexSplitAfterCursorEqualsStopTurnID(t *testing.T) {
+	chunks, _, found := openCodexFixtureStop(t, "turn-3").SplitAfter("turn-3")
+	if !found {
+		t.Fatal("cursor equal to stopTurnID must count as found")
 	}
-	start := time.Now()
-	src, err := OpenWait("codex", path, "never", 150*time.Millisecond, 20*time.Millisecond)
-	if err != nil {
-		t.Fatalf("OpenWait: %v", err)
-	}
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("OpenWait blocked %v; want bounded wait", elapsed)
-	}
-	if _, _, found := src.SplitAfter("never"); found {
-		t.Fatal("turn must still be absent after timeout")
+	if len(chunks) != 0 {
+		t.Errorf("chunks = %+v, want none", chunks)
 	}
 }
 
-// Claude Code sends no turn_id; OpenWait must not wait at all.
-func TestOpenWaitEmptyTurnIDSkipsWait(t *testing.T) {
-	start := time.Now()
-	if _, err := OpenWait("claude", filepath.Join(t.TempDir(), "absent.jsonl"), "", 2*time.Second, 100*time.Millisecond); err != nil {
-		t.Fatalf("OpenWait: %v", err)
+// From-begin replay during a Stop: completed turns keep their own IDs and the
+// in-flight turn rides on stopTurnID.
+func TestCodexSplitAfterFromStartWithStopTurnID(t *testing.T) {
+	chunks, _, found := openCodexFixtureStop(t, "turn-3").SplitAfter("")
+	if !found {
+		t.Fatal("cursor \"\" must always be found")
 	}
-	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
-		t.Fatalf("OpenWait waited %v with empty turn ID", elapsed)
+	if len(chunks) != 3 || chunks[2].LastUUID != "turn-3" || chunks[1].LastUUID != "turn-2" {
+		t.Fatalf("chunks = %+v, want three turns ending at turn-3", chunks)
 	}
 }
