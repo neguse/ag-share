@@ -48,7 +48,8 @@ On Windows, [Git for Windows](https://git-scm.com/downloads/win) is required
     "github.com/acme/product": {
       "service": "slack",
       "bot_token": "xoxb-...",
-      "channel": "C0XXXXXXX"
+      "channel": "C0XXXXXXX",
+      "default": "off"
     }
   }
 }
@@ -57,9 +58,10 @@ On Windows, [Git for Windows](https://git-scm.com/downloads/win) is required
 The key is the repo's `origin` remote normalized to `host/owner/repo` (an
 absolute path for repos without a remote). A key ending in `/*` matches by
 prefix — `"github.com/neguse/*"` covers every repo under that owner; an exact
-key beats a wildcard. Add `"default": "on"` to a repo entry to share every
-session in that repo without toggling — be deliberate about combining it with
-a wildcard key, since that auto-shares all matching repos.
+key beats a wildcard. `default` is optional and defaults to `"off"`; set it to
+`"on"` to share every session in that repo without toggling — be deliberate
+about combining it with a wildcard key, since that auto-shares all matching
+repos.
 
 The config is agent-neutral: one entry covers Claude Code and Codex sessions
 alike, and both agents' sessions in a repo land in the same channel (each
@@ -81,7 +83,8 @@ session still gets its own thread, labeled with the agent).
     "github.com/acme/product": {
       "service": "discord",
       "bot_token": "...",
-      "channel": "123456789012345678"
+      "channel": "123456789012345678",
+      "default": "off"
     }
   }
 }
