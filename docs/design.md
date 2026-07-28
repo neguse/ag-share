@@ -2,6 +2,10 @@
 
 A general-purpose tool that forwards coding-agent session content to a team chat service, turn by turn, so a team can follow work in near real time. Two seams keep it general: chat services sit behind a backend interface (Slack, Discord), and agents sit behind a transcript-source interface (Claude Code, Codex). Built entirely on the agents' hooks mechanisms, with no dependency on any specific project.
 
+This document describes the currently shipped Go implementation. The
+behavior-preserving Rust rewrite and the later asynchronous delivery redesign
+are staged separately in [rust-migration.md](rust-migration.md).
+
 ## Goals
 
 - Forward session exchanges (user input + agent responses) to a thread in the configured chat service that teammates can follow
@@ -42,19 +46,30 @@ sequenceDiagram
 ```
 
 - **UserPromptSubmit hook**: detects toggle prompts — a prompt consisting **exactly** of `share-on` / `share-on-from-begin` / `share-off` (exact match kills false positives; bare words rather than `#`-prefixed markers because leading `#` is the Claude Code CLI's memory shortcut), or the raw slash-command strings `/ag-share:on` / `/ag-share:on-from-begin` / `/ag-share:off` (verified on Claude Code: slash commands reach the hook as the raw typed string, not the expanded markdown) — switches session state, and **blocks** the toggle prompt. Verified empirically on Claude Code: a blocked prompt leaves no user entry in the transcript and the model is never invoked, so the toggle turn costs no tokens and is never forwarded; the hook's stderr is displayed to the user as immediate feedback. The plugin also ships `commands/on.md` / `off.md` for discoverability; their body only ever expands if the hook failed to intercept, so it instructs the model to tell the user the toggle did not take effect
-- **Stop hook**: on turn completion, extracts the turn's content from the transcript and posts it to the backend thread. On Claude Code, Stop fires only for the main agent (subagent completion fires `SubagentStop`, which this tool does not register) and does not fire on user interrupts (hooks guide); Codex documents the same event set
+- **Stop hook**: on turn completion, extracts the turn's content from the transcript and posts it to the backend thread. On Claude Code, Stop fires only for the main agent (subagent completion fires `SubagentStop`, which this tool does not register) and does not fire on user interrupts (hooks guide). Codex also exposes a Stop event, but its payload and transcript boundary are agent-specific
 - Both hooks exit 0 immediately for non-enabled sessions (minimal overhead)
 
-### Agent abstraction
+### Agent boundary
 
-Codex implements a hooks mechanism intentionally compatible with Claude Code's (hooks doc, learn.chatgpt.com/docs/hooks): the same events (`UserPromptSubmit`, `Stop`), the same stdin JSON fields (`session_id`, `transcript_path`, `cwd`, `prompt`), the same exit-2-blocks semantics, plugin-bundled hooks files with the same schema, and even `CLAUDE_PLUGIN_ROOT` provided to plugin hooks for compatibility. ag-share therefore runs the **same binary and the same hook logic for both agents**; only two things differ per agent:
+Claude Code and Codex use overlapping hook names and share a small envelope (`session_id`, `transcript_path`, `cwd`, and `hook_event_name`). That overlap is a compatibility convenience, not one event protocol. Event payloads, tool coverage, turn correlation, completion timing, interrupt behavior, supported handler types, and asynchronous execution differ. The transcript formats and cursor units are also completely different. See the current [Claude Code hooks reference](https://code.claude.com/docs/en/hooks) and [Codex hooks reference](https://developers.openai.com/codex/hooks).
 
-1. **The transcript format** — completely different on disk. The `transcript.Source` interface (`LatestCursor` / `Title` / `SplitAfter`) hides it; cursor strings are opaque and format-specific
-2. **Hook registration** — each agent's plugin manifest points at its own hooks file (`.claude-plugin/plugin.json` → `hooks/claude.json`, `.codex-plugin/plugin.json` → `hooks/codex.json`), and that file passes `--agent claude` / `--agent codex` to the binary
+The current turn-at-a-time implementation registers only `UserPromptSubmit` and `Stop`. For that narrow subset, the Go binary decodes a permissive superset input and shares some orchestration. This is an implementation shortcut, not the extension seam to use when more events are added. The durable delivery redesign uses a typed ingress adapter per agent and only joins the paths after each adapter has converted its raw event into an internal action and extracted semantic transcript progress.
 
-The agent is thus a **registration-time fact, not a runtime guess**: no sniffing of transcript contents, no environment heuristics. An unknown `--agent` value is rejected (a typo must not silently pick the wrong parser). One session state schema and one config serve both agents; the parent message labels the agent (Slack: `:claude:` / `:codex:` emoji, Discord: `[claude]` / `[codex]`).
+The durable boundary is:
 
-Codex-specific operational facts (verified against the hooks doc and codex-cli 0.145.0 unless noted):
+```text
+Claude hook payload -> Claude ingress -> Claude transcript/checkpoint --+
+                                                                      +-> semantic segments -> outbox
+Codex hook payload  -> Codex ingress  -> Codex transcript/checkpoint  --+
+```
+
+Tool events are flush hints, not portable content records. A `PostToolUse` payload must not be stored or rendered as if it were the shared message model. Claude can use `PostToolBatch` as a single batch flush point, while Codex currently needs `PostToolUse`; both retain Stop and later recovery events to catch progress their tool hooks do not observe. The exact post-parity trigger matrix is specified in [rust-migration.md](rust-migration.md).
+
+Each agent's plugin manifest points at its own hooks file (`.claude-plugin/plugin.json` → `hooks/claude.json`, `.codex-plugin/plugin.json` → `hooks/codex.json`), which passes `--agent claude` / `--agent codex` to the binary. The agent is therefore a **registration-time fact, not a runtime guess**: no sniffing of transcript contents and no environment heuristics. An unknown `--agent` value is rejected.
+
+The shared product model starts after ingress: one session state/config model, semantic user/assistant segments, and backend delivery. The parent message labels the agent (Slack: `:claude:` / `:codex:` emoji, Discord: `[claude]` / `[codex]`). Source checkpoints stay opaque and agent-specific rather than pretending every agent has a Codex-style `turn_id`.
+
+Codex-specific operational facts (verified against the Codex hooks reference and codex-cli 0.145.0 unless noted):
 
 - Hooks are a stable, default-on feature (`codex features list`: `hooks stable true`)
 - Codex requires the user to review and **trust each hook definition** (by hash) before it runs — `/hooks` in a Codex session; untrusted hooks are skipped silently. Trust and **enable** are separate states (`[hooks.state]` in `~/.codex/config.toml` records `trusted_hash` and `enabled` per hook): a hook that is trusted but not enabled is also skipped silently, with nothing in ag-share's `error.log` or Codex's TUI log (both checked). Observed on 2026-07-28: a first real session had `enabled = true` on only one of the two hooks and Stop simply never ran — when forwarding silently does nothing, check `[hooks.state]` first. This is a per-install, per-hook-change approval; the README documents it as an install step. Hook definitions live in the plugin and change rarely (binary updates flow through `bin/run.sh`, not the hook definition)

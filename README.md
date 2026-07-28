@@ -6,7 +6,8 @@ Discord are the available backends. One session = one thread; only a single
 parent message appears in the channel. Forwarding is **opt-in per session** —
 by default nothing is sent.
 
-Design details: [docs/design.md](docs/design.md).
+Design details: [docs/design.md](docs/design.md). Planned runtime migration:
+[docs/rust-migration.md](docs/rust-migration.md).
 
 ## Install
 
